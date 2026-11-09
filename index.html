@@ -242,6 +242,7 @@ button.ai{border-color:var(--gold);color:var(--gold);font-weight:700}
           <button id="rerollBtn" disabled>문구 바꾸기</button>
         </div>
       </div>
+      <div class="chips" id="lenChips" role="group" aria-label="답글 길이"><button type="button" class="chip" data-len="one">한 줄로 가볍게</button><button type="button" class="chip" data-len="long">자세히</button></div>
       <div class="mobile-only typeline"><span id="typeLine">아직 만든 답글이 없어요.</span><button type="button" id="typeBtn">유형 바꾸기</button></div>
       <textarea class="out edit" id="outZh" aria-label="답글 (직접 수정 가능)" placeholder="원글을 넣고 ‘답글 만들기’를 누르세요."></textarea>
       <p class="kw" id="editHint" style="margin:-4px 0 0">답글 칸을 눌러 바로 고칠 수 있어요. 수정한 내용 그대로 복사돼요.</p>
@@ -347,7 +348,7 @@ const TYPES={
 const PRIORITY=["T15","T16","T7","T6","T2","T5","T9","T10","T1","T3","T4","T12"];
 
 /* ---------- 설정 ---------- */
-const DEF={ver:2,clinic:"골드제이의원",clinicKo:"골드제이의원",city:"서울",loc:"선릉역 1번 출구 근처",locKo:"선릉역 1번 출구 근처",promo:false,rate:0,tax:"",zh:false,doc:true,procs:{},custom:[]};
+const DEF={ver:2,clinic:"골드제이의원",clinicKo:"골드제이의원",city:"서울",loc:"선릉역 1번 출구 근처",locKo:"선릉역 1번 출구 근처",promo:false,rate:0,tax:"",zh:false,doc:true,len:"one",procs:{},custom:[]};
 let S=load();
 function load(){try{const v=JSON.parse(localStorage.getItem("gj-reply-settings-kr")||"null");if(v)return Object.assign({},DEF,v,{procs:Object.assign({},v.procs||{}),custom:Array.isArray(v.custom)?v.custom:[]});}catch(e){}return JSON.parse(JSON.stringify(DEF));}
 function save(){try{localStorage.setItem("gj-reply-settings-kr",JSON.stringify(S));}catch(e){} status();}
@@ -437,64 +438,71 @@ function analyze(text){
   return {type,scores,hits,concerns,procs,wantsPrice,busan,medical,region,chat:type==="T8"};
 }
 
-/* ---------- 문구 조각 — 골드제이 한국 계정 (2026-11-09) ----------
-   레퍼런스(국내 병원·원장 계정 답글 50장)는 흐름만 참고: 짧게(2~5줄), 원글 고민에 바로 답, 홍보는 한 줄.
-   타 병원 문장·시그니처(“필러는 우리!”, “○○맛집” 등)는 쓰지 않음. 톤은 해요체, 이모지 0~2개.
-   국내 의료광고 규정 때문에 댓글에 가격·할인·효과 보장·타 병원 비교는 넣지 않음. */
+/* ---------- 문구 조각 — 골드제이 한국 계정 v2 (2026-11-09, 사람 말투) ----------
+   원칙: 한 줄씩 끊지 않고 말하듯 이어서 2~3줄. 원글에 나온 부위·상황을 그대로 받아서 시작.
+   ~거든요/~더라고요/사실/근데 같은 연결어, ㅎㅎ·ㅠㅠ는 가끔만, 이모지는 0~1개.
+   병원 소개는 한 문장, 국내 의료광고 규정 때문에 가격·할인·효과 보장·타 병원 비교는 넣지 않음. */
 const EMO={
-  face:["🙂","😊","✨","🤍","",""],
-  bul:["- ","· ","✔️ "],
-  ok:["✔️","✅"], ng:["❌"],
-  tip:["📌","💡",""],
-  end:["🙂","😊","✨","🤍",""],
-  price:["💰","📋"]
+  face:["🙂","😊","",""," ㅎㅎ",""],
+  bul:["- ","· "],
+  end:["🙂","😊","🤍","","",""],
+  price:["📋",""]
 };
 let E={};
-function newStyle(){E={};for(const k in EMO)E[k]=pick(EMO[k],rnd);E.pf=pick([0,1,2],rnd);}
+function newStyle(){E={};for(const k in EMO)E[k]=pick(EMO[k],rnd);}
 const V=arr=>pick(arr,rnd);
-const sp=x=>x?" "+x:"";
+const sp=x=>!x?"":(x.startsWith(" ")?x:" "+x);
+/* 받침 따라 조사 고르기: J("이마","은는") → 이마는 */
+function J(w,pair){const c=w.charCodeAt(w.length-1);const has=c>=0xAC00&&c<=0xD7A3&&(c-0xAC00)%28!==0;
+  const m={"은는":["은","는"],"이가":["이","가"],"을를":["을","를"],"과와":["과","와"],"이에요":["이에요","예요"]}[pair];return w+(has?m[0]:m[1]);}
+const SHORT={forehead:"이마",temple:"관자",lip:"입술",undereye:"눈밑",nose:"코",chin:"턱끝",nasolabial:"팔자",cheek:"볼",lift:"처짐",wrinkle:"주름",pore:"모공",dull:"피부톤",face:"사각턱"};
+
+/* 첫마디 — {A}=원글 부위(없으면 빈 문자열 대체문 사용) */
 const OPEN={
-  T1:[{zh:"{C} 한번 봐 주세요{E}"},{zh:"여기요{E} {C}도 한번 알아봐 주세요."},{zh:"병원 고르기 진짜 고민되죠."}],
-  T2:[{zh:"가격 정말 궁금하시죠."},{zh:"비용 부분은 저희도 자주 질문받아요{E}"}],
-  T3:[{zh:"이건 원인부터 보는 게 먼저예요{E}"},{zh:"고민 많으셨겠어요."},{zh:"딱 정리해 드리면요{E}"}],
-  T4:[{zh:"솔직한 후기 감사해요{E}"},{zh:"공유해 주셔서 감사해요."}],
-  T5:[{zh:"양은 사진만으로 딱 정하긴 어려워요."},{zh:"좋은 질문이에요{E}"},{zh:"이건 사람마다 정말 달라요."}],
-  T6:[{zh:"무서운 마음 당연해요{E}"},{zh:"통증 걱정 많이들 하세요."}],
-  T9:[{zh:"사진만 보고 단정하긴 어렵지만요{E}"},{zh:"충분히 고민될 만해요."},{zh:"하신다면 방향이 중요해요{E}"}],
-  T10:[{zh:"좋은 피부는 꾸준함이 제일이에요{E}"},{zh:"홈케어도 정말 중요하죠."}],
-  T11:[{zh:"솔직하게 말씀드리면요{E}"}],
-  T12:[{zh:"멀리서 오시는 거라 고민되시죠 🥲"},{zh:"솔직하게 말씀드리면요."}],
-  T15:[{zh:"많이 속상하셨겠어요 🥲"},{zh:"이런 경우 꽤 많아요."},{zh:"급하게 결정하지 않으셔도 돼요."}],
-  T16:[{zh:"축하드려요{E}"},{zh:"일정이 제일 중요해요{E}"}],
-  T7:[{zh:""}],T8:[{zh:""}]
+  T1:[["어디로 가야 할지 고르는 게 제일 어렵죠ㅠㅠ","병원 찾는 게 은근 제일 스트레스예요ㅠㅠ","{A_은는} 병원마다 스타일이 달라서 더 고민되실 것 같아요."]],
+  T2:[["비용 궁금하시죠ㅎㅎ","가격 먼저 알고 가고 싶은 마음 너무 이해돼요."]],
+  T3:[["이것 때문에 신경 많이 쓰이셨죠ㅠㅠ","{A} 고민이시군요!","저도 이 질문 자주 받는데요{E}"]],
+  T4:[["자세히 써 주셔서 읽으면서 고개 끄덕였어요ㅎㅎ","후기 이렇게 솔직하게 남겨 주시면 다른 분들께도 진짜 도움 돼요."]],
+  T5:[["{A} 양 고민 진짜 많이들 하세요ㅎㅎ","몇 cc 넣어야 하는지가 제일 궁금하시죠.","이거 상담 때 제일 많이 받는 질문이에요{E}"]],
+  T6:[["아플까 봐 걱정되는 거 너무 당연해요ㅠㅠ","통증 때문에 망설이시는 분들 진짜 많아요."]],
+  T9:[["{A_은는} 사진만 보고 딱 말씀드리긴 조심스럽지만요,","충분히 고민될 만한 부분이에요.","{A} 쪽이 계속 신경 쓰이셨나 봐요."]],
+  T10:[["피부는 결국 꾸준함이 이기더라고요{E}","홈케어 고민 너무 공감돼요ㅎㅎ"]],
+  T11:[["말씀하신 시술은 저희가 하진 않는데요,"]],
+  T12:[["멀리서 오시는 거라 더 고민되시죠ㅠㅠ","거리 생각하면 진짜 고민되실 것 같아요."]],
+  T15:[["아이고 많이 속상하셨겠어요ㅠㅠ","생각했던 거랑 달라서 마음 쓰이셨겠어요ㅠㅠ","너무 걱정 마세요, 생각보다 이런 고민 많이 하세요."]],
+  T16:[["우선 축하드려요{E}","좋은 날 앞두고 계시네요, 축하드려요!"]],
+  T7:[[""]],T8:[[""]]
 };
+/* 부위별 실제 답 — 말하듯 */
 const AREA={
-  forehead:["이마는 이마만 보기보다 관자·미간까지 이어지는 라인을 같이 봐야 자연스러워요.","이마는 원래 뼈 모양과 라인에 따라 필요한 양이 꽤 달라서, 직접 보고 정하는 게 정확해요."],
-  temple:["관자는 이마와 라인을 이어 줘야 땅콩형이 자연스럽게 정리돼요.","관자만 채우기보다 이마·옆볼과의 연결을 같이 보는 게 좋아요."],
-  lip:["입술은 양보다 디자인이에요. 대표원장님 전용 터치업키스(TOUCH UP KISS)는 원래 입술 모양과 얼굴 비율에 맞춰 입술선·중앙 볼륨을 잡아요.","입술은 많이 넣는다고 예쁜 게 아니라 비율이 중요해요. 저희는 대표원장님이 입술선과 위아래 비율까지 직접 디자인해요."],
-  undereye:["눈밑은 꺼짐 정도와 피부 두께에 따라 필러가 맞는지, 재생 쪽 시술이 나은지 달라져요."],
-  nose:["코는 높이보다 이마·턱과의 비율이 중요해요. 얼굴 전체 밸런스를 보고 정하는 게 자연스러워요."],
-  chin:["턱끝은 원래 얼굴형 비율에 맞춰 과하게 길거나 뾰족하지 않게 잡는 게 포인트예요."],
-  nasolabial:["팔자는 꺼져서 생긴 건지, 처져서 생긴 건지에 따라 채울지 당길지가 달라져요."],
-  cheek:["볼·중안부는 꺼진 곳은 채우고 처진 곳은 올려야 해서 원인부터 보는 게 먼저예요."],
-  lift:["처짐은 정도에 따라 울쎄라·써마지 같은 리프팅이 맞는지, 볼륨 보충이 필요한지 달라져요.","리프팅은 샷 수보다 어느 층에 얼마나 주는지가 중요해요."],
-  wrinkle:["주름은 깊이와 위치에 따라 보톡스·스킨부스터·리프팅 중 맞는 걸 골라야 해요."],
-  pore:["모공·흉터는 포텐자+쥬베룩처럼 피부결 시술을 몇 번 나눠서 하는 경우가 많아요."],
-  dull:["칙칙함은 제네오엑스 같은 광채 관리에 홈케어를 같이 가져가는 게 좋아요."],
-  face:["사각턱은 근육 때문인지 침샘·지방 때문인지 먼저 확인해야 보톡스 효과를 제대로 볼 수 있어요."]
+  forehead:["이마는 이마만 채우기보다 관자·미간까지 라인이 자연스럽게 이어지는지가 더 중요하더라고요.","이마는 원래 뼈 모양이 다 달라서, 같은 cc라도 누구는 딱 좋고 누구는 과해 보일 수 있어요."],
+  temple:["관자는 이마랑 옆볼까지 이어서 봐야 땅콩형이 자연스럽게 정리되거든요.","관자만 따로 채우면 오히려 어색할 수 있어서 이마 라인이랑 같이 보는 게 좋아요."],
+  lip:["입술은 양보다 모양이랑 비율이 훨씬 중요하거든요. 저희는 대표원장님이 터치업키스로 원래 입술선이랑 얼굴 비율에 맞춰서 직접 디자인해요.","입술은 많이 넣는다고 예뻐지는 게 아니더라고요. 대표원장님이 입술선, 위아래 비율까지 보고 터치업키스로 잡아 드려요."],
+  undereye:["눈밑은 꺼짐 정도랑 피부 두께에 따라 필러가 맞는 분도 있고, 재생 쪽 시술이 더 나은 분도 있어요.","눈밑은 조금만 과해도 티가 나는 부위라 양보다 위치를 정확하게 잡는 게 중요해요."],
+  nose:["코는 높이보다 이마·턱이랑 비율이 맞아야 자연스럽더라고요."],
+  chin:["턱끝은 길이보다 옆에서 봤을 때 라인이 중요해서, 원래 얼굴형에 맞춰 과하지 않게 잡는 게 포인트예요."],
+  nasolabial:["팔자는 꺼져서 생긴 건지 처져서 생긴 건지에 따라 채울지 당길지가 완전히 달라지거든요."],
+  cheek:["볼은 꺼진 데는 채우고 처진 데는 올려야 해서, 원인부터 보는 게 먼저예요."],
+  lift:["처짐은 정도에 따라 울쎄라·써마지 같은 리프팅이 맞을 수도 있고, 볼륨을 같이 채워야 할 수도 있어요.","리프팅은 샷 수보다 어느 층에 얼마나 주느냐가 더 중요하더라고요."],
+  wrinkle:["주름은 깊이랑 위치에 따라 보톡스가 맞을지, 스킨부스터나 리프팅이 맞을지가 달라요."],
+  pore:["모공이나 흉터는 한 번에 확 바뀌기보단 포텐자·쥬베룩처럼 몇 번 나눠서 차곡차곡 좋아지는 경우가 많아요."],
+  dull:["칙칙한 톤은 관리 받으면서 홈케어를 같이 해 주시면 꽤 달라지더라고요."],
+  face:["사각턱은 근육 때문인지 침샘이나 지방 때문인지 먼저 봐야 보톡스 효과를 제대로 보실 수 있어요."]
 };
-const CTA=[
-  {zh:"궁금한 건 DM 주세요{END}"},
-  {zh:"프로필에서 사례 보실 수 있어요{END}"},
-  {zh:"사진을 DM으로 보내 주시면 상담 때 더 정확히 말씀드릴게요{END}"},
-  {zh:"편하게 문의 주세요{END}"}
-];
-function diffPool(){
-  const a=[{zh:"100% 예약제라 상담 시간을 충분히 가져요"},{zh:"필요 없는 시술은 권하지 않아요"},{zh:"원래 얼굴 비율에 맞춰 자연스럽게 디자인해요"}];
-  if(S.doc)a.unshift(V([{zh:"원장님이 1:1로 직접 상담하고 직접 시술해요"},{zh:"상담부터 시술까지 원장님이 직접 해요"}]));
-  return a;
+const CLINIC=(a0)=>{const a=["저희는 100% 예약제라 상담 시간을 넉넉하게 잡아서 천천히 같이 봐 드려요.","저희는 필요 없는 시술은 굳이 권하지 않아요."];
+  if(a0&&a0.concerns.some(c=>["forehead","temple","lip","undereye","nose","chin","nasolabial","cheek","face"].includes(c)))a.push("저희는 원래 얼굴 비율을 살리는 쪽으로 자연스럽게 디자인해요.");
+  if(S.doc)a.push("저희는 원장님이 상담부터 시술까지 직접 보셔서 이런 부분 꼼꼼하게 체크해 드려요.","저희는 원장님이 1:1로 직접 상담하고 시술하세요.");return a;};
+const CTA=["사진 한 장 DM으로 보내 주시면 같이 봐 드릴게요{END}","궁금한 거 있으면 편하게 DM 주세요{END}","고민되시면 부담 갖지 말고 물어봐 주세요{END}","프로필에 사례도 있으니 한번 구경해 보세요{END}"];
+
+function fill(s,a){
+  const ar=a&&a.concerns&&a.concerns[0]?SHORT[a.concerns[0]]:"";
+  return s.replace(/\{A_(은는|이가|을를)\}/g,(m,p)=>ar?J(ar,p):"이 부분"+({"은는":"은","이가":"이","을를":"을"}[p]))
+    .replace(/\{A\}/g,ar||"이 부분")
+    .replace(/\{E\}/g,sp(E.face)).replace(/\{END\}/g,sp(E.end))
+    .replace(/\{CITY\}/g,S.city||"서울").replace(/\{C\}/g,S.clinic||"[병원명]").replace(/\{CK\}/g,S.clinic||"[병원명]")
+    .replace(/이 부분은 병원마다/,"병원마다").replace(/이 부분 고민이시군요!/,"이 고민 많이들 하세요!").replace(/이 부분 양 고민/,"양 고민").replace(/이 부분 쪽이/,"이 부분이")
+    .replace(/\s+/g," ").trim();
 }
-function fill(s){return s.replace(/\{E\}/g,sp(E.face)).replace(/\{END\}/g,sp(E.end)).replace(/\{CITY\}/g,S.city||"서울").replace(/\{C\}/g,S.clinic||"[병원명]").replace(/\{CK\}/g,S.clinic||"[병원명]").trim();}
 function money(krw){const n=parseInt(krw,10);if(!n)return null;const man=n/10000;const t=(Math.round(man*10)/10).toString()+"만 원";return {zh:t,ko:t};}
 function procsFor(a,limit){
   let ids=[...a.procs];
@@ -502,68 +510,116 @@ function procsFor(a,limit){
   return ids.slice(0,limit).map(id=>ALL().find(p=>p.id===id));
 }
 function build(a,type){
+  if(S.len!=="long")return buildOne(a,type);
   newStyle();
-  const L=[];const add=t=>{const x=fill(t);if(x)L.push({zh:x,ko:x});};const addV=arr=>add(V(arr).zh);
-  const o=pick(OPEN[type],rnd);if(o.zh)add(o.zh);
+  const P1=[],P2=[],L=[];
+  const f=t=>fill(t,a);
+  const s1=t=>{const x=f(t);if(x)P1.push(x);}, s2=t=>{const x=f(t);if(x)P2.push(x);};
   const area=a.concerns.filter(c=>AREA[c]).slice(0,2);
-  const areaLines=()=>{for(const c of area)add(V(AREA[c]));};
-  if(type==="T8"){add("[원글 내용에 대한 짧고 따뜻한 공감 한 줄]{E}");return {lines:L};}
-  if(type==="T7"){add("[직원이 실제로 받아 본 시술과 느낌을 한 줄로]{END}");return {lines:L,warnExp:true};}
+  const areaLines=(n=area.length)=>{for(const c of area.slice(0,n))s1(V(AREA[c]));};
+  const out=()=>{const lines=[P1.join(" "),P2.join(" "),...L].filter(Boolean).map(x=>({zh:x,ko:x}));return lines;};
+  if(type==="T8"){return {lines:[{zh:"[원글에 대한 짧고 다정한 한마디 — 예: 와 오늘 날씨 진짜 좋았죠ㅎㅎ]",ko:""}]};}
+  if(type==="T7"){return {lines:[{zh:"[직원이 실제로 받아 본 시술과 느낌을 편하게 한두 줄로]",ko:""}],warnExp:true};}
+  s1(V(OPEN[type][0]));
   if(type==="T12"){
-    add(`저희는 {CITY} 강남${S.loc?`(${S.loc})`:""}에 있어서 ${a.region||"[지역]"}에서는 거리가 좀 있어요.`);
-    addV([{zh:"{CITY} 오실 일정이 있으면 그때 상담받아 보세요{END}"},{zh:"가까운 곳에서 받으시더라도 원장님이 직접 상담·시술하는지는 꼭 확인해 보세요{END}"}]);
-    return {lines:L};
+    s1(`저희가 ${S.city||"서울"} 강남${S.loc?` ${S.loc}`:""}에 있어서 ${a.region||"그쪽"}에서 오시기엔 거리가 좀 있긴 해요.`);
+    s2(V(["혹시 서울 올라오실 일정 있으면 그때 맞춰서 상담 한번 받아 보셔도 좋아요{END}","가까운 곳에서 하시더라도 원장님이 직접 상담하고 시술하는지는 꼭 확인해 보세요{END}"]));
+    return {lines:out()};
   }
   if(type==="T15"){
-    addV([{zh:"다시 할지는 붓기가 다 빠진 상태에서 얼굴 전체 밸런스를 보고 정하는 게 좋아요."},{zh:"녹일지 보완할지는 지금 남아 있는 양과 위치를 먼저 봐야 정할 수 있어요."}]);
-    if(!a.concerns.length)addV([{zh:"녹인 뒤엔 바로 다시 채우기보다 붓기가 가라앉을 때까지 기다렸다가 결정하는 경우가 많아요."},{zh:"무리하게 덧채우면 오히려 더 티가 날 수 있어서 신중하게 보는 게 좋아요."}]);
-    areaLines();
-    add("재교정은 원장님이 직접 보고 방향을 말씀드려요.");
+    s1(V(["녹일지 살짝 보완할지는 지금 남아 있는 양이랑 위치를 먼저 봐야 정할 수 있어요.","붓기 다 빠진 상태에서 얼굴 전체 밸런스를 보고 다시 정하시는 게 좋아요."]));
+    if(!area.length)s1(V(["녹이고 나서 바로 다시 채우기보단 조금 기다렸다가 결정하시는 게 마음도 편하더라고요.","급하게 덧채우면 오히려 더 티 날 수 있어서 천천히 보시는 게 좋아요."]));
+    areaLines(1);
+    s2("재교정은 원장님이 직접 보고 방향 말씀드려요.");
   }
   if(type==="T16"){
-    add("큰 시술은 행사 한 달 전쯤 마치고, 직전 1~2주는 붓기·멍 걱정이 적은 관리 위주로 가는 게 안전해요.");
-    add("다만 시술마다 회복 기간이 달라서 남은 날짜를 말씀해 주시면 맞춰서 안내드릴게요.");
-    areaLines();
+    s1(V(["큰 시술은 한 달 전쯤 끝내 두시고, 직전 1~2주는 붓기나 멍 걱정 적은 관리 위주로 가시는 게 마음 편해요.","보통은 행사 한 달 전쯤 시술 마치고, 마지막 1~2주는 가벼운 관리만 하시는 걸 추천드려요."]));
+    s1("남은 날짜 알려 주시면 거기에 맞춰서 순서 짜 드릴게요.");
   }
   if(type==="T5"){
-    add("뼈 모양·피부 두께·원하는 라인에 따라 필요한 양이 달라서, 직접 보고 정하는 게 제일 정확해요.");
-    areaLines();
+    s1(V(["근데 사실 뼈 모양이나 피부 두께, 원하는 라인에 따라 필요한 양이 다 달라서 직접 보고 정하는 게 제일 정확해요.","같은 부위라도 사람마다 필요한 양이 꽤 달라서, 사진보다는 직접 보고 정하는 게 제일 안전해요."]));
+    areaLines(1);
   }
   if(type==="T6"){
-    addV([{zh:"시술 전에 마취크림을 바르고, 부위에 따라 마취 방법도 조절해요."},{zh:"통증이 걱정되면 미리 말씀해 주세요. 마취와 시술 방법을 맞춰 드려요."}]);
+    s1(V(["시술 전에 마취크림 충분히 바르고, 부위에 따라 마취 방법도 조절해 드려요.","걱정되시면 미리 말씀만 해 주세요, 마취랑 속도까지 맞춰서 천천히 해 드려요."]));
   }
   if(type==="T2"){
-    add("가격은 댓글로 안내드리기 어려워서 DM 주시면 자세히 알려드릴게요.");
+    s1("다만 댓글로는 가격 안내가 어려워서요ㅠㅠ DM 주시면 자세히 알려드릴게요!");
   }
   if(type==="T9"||type==="T3"||type==="T1"||type==="T4"){
-    if(area.length)areaLines();
-    else if(type!=="T1")addV([{zh:"원인을 먼저 보고 맞는 방법을 고르는 게 좋아요."},{zh:"사람마다 맞는 방법이 달라서 직접 보고 정하는 게 정확해요."}]);
-    if(type==="T3"&&!area.length){const ps=procsFor(a,2);if(ps.length)add(`${ps.map(p=>P(p).zh).join(", ")} 쪽을 같이 상담해 보셔도 좋아요.`);}
+    if(area.length)areaLines(type==="T1"?1:2);
+    else if(type!=="T1")s1(V(["원인부터 먼저 보고 맞는 방법을 고르시는 게 좋아요.","사람마다 맞는 방법이 달라서 직접 보고 정하는 게 제일 정확하더라고요."]));
+    if(type==="T3"&&!area.length){const ps=procsFor(a,2);if(ps.length)s1(`${ps.map(p=>P(p).zh).join(", ")} 쪽으로 같이 상담해 보셔도 좋을 것 같아요.`);}
   }
   if(type==="T10"){
-    add("자외선 차단, 순한 세안, 충분한 보습이 기본이에요. 각질 제거는 너무 자주 하지 않는 게 좋아요.");
-    addV([{zh:"정기적으로는 쥬베룩·리쥬란 같은 피부결 관리를 같이 하는 분들이 많아요."},{zh:"홈케어로 부족한 부분은 피부 상태 보고 관리 방향을 잡아 드려요."}]);
+    s1("기본은 자외선 차단, 순한 세안, 보습이고 각질 제거는 너무 자주 안 하시는 게 좋아요.");
+    s1(V(["여기에 쥬베룩이나 리쥬란 같은 피부결 관리를 가끔 같이 하시는 분들이 많아요.","홈케어로 아쉬운 부분은 피부 상태 보고 방향 잡아 드릴 수 있어요."]));
   }
   if(type==="T11"){
-    add("[원글 시술]은 저희가 하지 않지만, [고민]이 목적이라면 다른 방법도 있어요.");
-    for(const p of procsFor(a,2))add(`${E.bul}${P(p).zh}: ${p.effZh}`);
+    s1("[고민]이 목적이시면 다른 방법도 있어요.");
+    for(const p of procsFor(a,2))L.push(`${E.bul}${P(p).zh}: ${p.effZh}`);
   }
-  /* 우리 병원 한 줄 */
-  const pool=diffPool();
-  if(type!=="T2"){
-    const d=pool.splice(Math.floor(rnd()*pool.length),1)[0];
-    addV([{zh:`${S.clinic||"[병원명]"}은 ${d.zh}.`},{zh:`저희는 ${d.zh}.`}]);
+  /* 우리 병원 한 문장 + 마무리 */
+  if(type!=="T2"&&type!=="T15"&&!(type==="T1"&&false)){
+    const lipDone=area.includes("lip")&&P1.some(x=>x.includes("대표원장님"));
+    if(!lipDone||rnd()<.3)s2(V(CLINIC(a)));
   }
-  if(S.loc&&(type==="T1"||type==="T2")&&rnd()<.6)add(`📍 ${S.loc}`);
+  if(type==="T1"&&S.loc&&rnd()<.5)s2(`${S.loc}에 있어요!`);
   let priceNote=null;
   const sel=[...state.priceSel].map(id=>ALL().find(p=>p.id===id)).filter(p=>p&&P(p).krw);
   if(sel.length){
-    const tz=S.tax?` (${S.tax})`:"";add(`${E.price} 참고 가격${tz}`);
-    for(const p of sel){const v=P(p),m=money(v.krw);add(`${E.bul}${v.zh}${v.unit?` ${v.unit}`:""} ${m.zh}`);}
+    const tz=S.tax?` (${S.tax})`:"";L.push(`${E.price?E.price+" ":""}참고 가격${tz}`);
+    for(const p of sel){const v=P(p),m=money(v.krw);L.push(`${E.bul}${v.zh}${v.unit?` ${v.unit}`:""} ${m.zh}`);}
     priceNote="댓글에 가격을 쓰면 의료광고 심의 대상이 될 수 있어요. 게시 전 내부 기준을 꼭 확인해 주세요.";
-  }else if(a.wantsPrice&&type!=="T2"){add("가격은 DM으로 자세히 안내드릴게요.");}
-  const c=pick(CTA,rnd);add(c.zh);
-  return {lines:L,priceNote};
+  }else if(a.wantsPrice&&type!=="T2"){s2("가격은 DM으로 자세히 알려드릴게요!");}
+  if(type!=="T2")s2(V(CTA));
+  return {lines:out(),priceNote};
+}
+
+/* 한 줄 모드 — 스레드식으로 가볍게 툭 던지는 답글 */
+const ONE_AREA={
+  forehead:["이마는 cc보다 관자까지 라인 이어주는 게 포인트예요 ㅎㅎ","이마는 뼈 모양 따라 양이 달라서 직접 보고 정하는 게 제일 정확해요!","이마는 과하면 티 나서 라인 위주로 가는 게 예뻐요"],
+  temple:["관자는 이마랑 이어서 채워야 땅콩형이 자연스럽게 정리돼요!","관자만 따로 하면 어색할 수 있어서 이마 라인이랑 같이 보는 게 좋아요 ㅎㅎ"],
+  lip:["입술은 양보다 모양이에요! 원장님이 입술선부터 잡아드려요 ㅎㅎ","입술은 많이 넣는 것보다 비율이 진짜 중요해요","입술 고민이면 사진 DM 주세요! 라인 보고 말씀드릴게요"],
+  undereye:["눈밑은 양보다 위치가 진짜 중요해요!","눈밑은 꺼짐 정도 따라 필러가 맞을지 재생 쪽이 맞을지 달라요 ㅎㅎ"],
+  nose:["코는 높이보다 이마·턱이랑 비율이 맞아야 예뻐요!"],
+  chin:["턱끝은 옆라인 보면서 과하지 않게 잡는 게 포인트예요 ㅎㅎ"],
+  nasolabial:["팔자는 꺼진 건지 처진 건지부터 봐야 해요!"],
+  cheek:["볼은 꺼진 데 채우고 처진 데 올려야 자연스러워요 ㅎㅎ"],
+  lift:["리프팅은 샷 수보다 어느 층에 주느냐가 더 중요해요!","처짐 정도 따라 맞는 리프팅이 달라요 ㅎㅎ 사진 DM 주시면 봐드릴게요"],
+  wrinkle:["주름은 위치 따라 보톡스가 맞을지 부스터가 맞을지 달라요!"],
+  pore:["모공은 한 번에 확보다 몇 번 나눠서 잡는 게 답이더라고요 ㅎㅎ"],
+  dull:["톤은 관리랑 홈케어 같이 가면 꽤 달라져요!"],
+  face:["사각턱은 근육인지 침샘인지부터 봐야 보톡스 효과 제대로 봐요!"]
+};
+const ONE={
+  T1:["{C} 어떠세요? 원장님이 직접 상담하고 시술해요 ㅎㅎ","저희 한번 와보세요! 선릉역 1번 출구 바로 근처예요","100% 예약제라 상담 여유 있게 받으실 수 있어요 ㅎㅎ"],
+  T2:["가격은 댓글로 안내가 어려워서 DM 주시면 바로 알려드릴게요!","DM 주시면 가격 자세히 알려드릴게요 ㅎㅎ"],
+  T3:["사진 DM 주시면 원인부터 같이 봐드릴게요!","원인 따라 방법이 달라서 직접 보는 게 제일 빨라요 ㅎㅎ"],
+  T4:["후기 꼼꼼하게 남겨주셔서 감사해요 ㅎㅎ","이런 솔직한 후기 너무 좋아요!"],
+  T5:["양은 사람마다 달라서 직접 보고 정하는 게 제일 정확해요!","몇 cc보다 어디에 넣느냐가 더 중요해요 ㅎㅎ"],
+  T6:["마취크림 충분히 바르고 천천히 해드려요 걱정 마세요 ㅎㅎ","통증 걱정되시면 미리 말씀만 주세요! 마취부터 맞춰드려요"],
+  T9:["사진 DM 주시면 필요한지부터 솔직하게 말씀드릴게요!","필요 없으면 안 해도 된다고 말씀드려요 ㅎㅎ"],
+  T10:["자외선 차단이랑 보습만 꾸준히 해도 반은 성공이에요 ㅎㅎ","각질 제거는 너무 자주 안 하는 게 좋아요!"],
+  T11:["[고민]이 목적이면 다른 방법도 있어요! DM 주세요 ㅎㅎ"],
+  T12:["서울 오실 일정 있으면 그때 맞춰서 한번 들러주세요 ㅎㅎ","멀리서 오시는 거면 미리 DM으로 상담 일정 맞춰보셔도 좋아요!"],
+  T15:["녹일지 보완할지는 남은 양 보고 정하면 돼요 너무 걱정 마세요ㅠㅠ","사진 DM 주시면 원장님이 재교정 방향 봐드려요!"],
+  T16:["큰 시술은 한 달 전까진 끝내두시는 게 마음 편해요 ㅎㅎ 축하드려요!","축하드려요! 남은 날짜 알려주시면 일정 맞춰드릴게요"],
+  T7:["[원글에 한 줄로 가볍게 반응 — 예: 이거 저도 받아봤는데 [느낌] ㅎㅎ]"],
+  T8:["[원글에 한 줄로 가볍게 공감 — 예: 와 이거 완전 공감이에요 ㅋㅋ]"]
+};
+function buildOne(a,type){
+  newStyle();
+  const area=a.concerns.filter(c=>ONE_AREA[c]);
+  let pool=(ONE[type]||ONE.T3).filter(x=>S.doc||!x.includes("원장님"));
+  if(area.length&&["T1","T3","T5","T9"].includes(type)&&rnd()<(type==="T3"?.85:.6))pool=ONE_AREA[area[0]].filter(x=>S.doc||!x.includes("원장님"));
+  if(!pool.length)pool=ONE.T3;
+  const line=fill(V(pool),a);
+  const L=[{zh:line,ko:line}];let priceNote=null;
+  const sel=[...state.priceSel].map(id=>ALL().find(p=>p.id===id)).filter(p=>p&&P(p).krw);
+  if(sel.length){for(const p of sel){const v=P(p),m=money(v.krw);const t=`${E.bul}${v.zh}${v.unit?` ${v.unit}`:""} ${m.zh}`;L.push({zh:t,ko:t});}
+    priceNote="댓글에 가격을 쓰면 의료광고 심의 대상이 될 수 있어요. 게시 전 내부 기준을 꼭 확인해 주세요.";}
+  return {lines:L,priceNote,warnExp:type==="T7"};
 }
 
 /* 우리 실제 답글 예시 — 아직 없음. 실제로 단 한국어 답글 파일을 보내 주시면 여기에 추가 */
@@ -723,11 +779,11 @@ function aiPrompt(){
   const system=`너는 서울 선릉역 근처 피부과 골드제이의원의 스레드(Threads) 담당자다. 국내 유저 글에 자연스러운 한국어 해요체로 답한다.
 규칙:
 1. 원글의 구체적인 고민(부위, 상황, 일정, 걱정)에 바로 답하는 문장으로 시작한다. 누구에게나 붙일 수 있는 일반 문장으로 시작하지 않는다.
-2. 짧게 2~5줄. 원글 질문에 실제로 도움이 되는 답을 먼저 주고, 병원 소개는 한 줄 이하로 붙인다.
+2. ${S.len==="long"?"사람이 직접 쓴 것처럼 자연스럽게. 한 문장씩 줄바꿈하지 말고 말하듯 이어서 2~3줄로 쓴다. ~거든요/~더라고요/근데/사실 같은 구어체 연결어를 쓴다. 원글 질문에 실제로 도움이 되는 답을 먼저 주고, 병원 소개는 한 문장 이하.":"스레드 댓글답게 딱 한 줄(40자 안팎)로 가볍게 툭 던진다. 원글 핵심에 바로 반응하는 한마디 + 필요하면 'DM 주세요' 정도. 설명·병원 소개 나열 금지."} ㅎㅎ·ㅠㅠ는 상황에 맞을 때만 한 번 정도. 안내문·공지 같은 딱딱한 문장(예: '~하는 것이 좋습니다', '~안내드립니다')은 피한다. 해요체를 쓰되 '~해드려요'처럼 편하게.
 3. 병원 정보·시술 목록에 없는 사실(장비, 원장 경력·자격, 수상, 이벤트)은 지어내지 않는다.
 4. 국내 의료광고 규정을 지킨다: 가격·할인·이벤트·무료 언급 금지(가격 질문은 DM 안내), 치료 경험담·전후 비교 금지, 타 병원 비교·비방 금지, 효과 보장·최상급·부작용/통증 없음 단정·영구 효과 금지. 금지 표현: ${RISK.map(r=>r[0]).join(", ")} (단, '100% 예약제'는 써도 된다).
 5. 필러 cc·샷 수 같은 구체 용량은 사진만으로 단정하지 말고 직접 보고 정한다고 쓴다.
-6. 반말, 과한 친근함, 다른 병원 계정의 고유 말투는 쓰지 않는다. 이모지는 0~2개, 🌸는 쓰지 않는다.
+6. 반말, 과한 친근함, 다른 병원 계정의 고유 말투는 쓰지 않는다. 이모지는 0~1개, 🌸는 쓰지 않는다.
 7. 원글이 시술과 무관한 일상 글이면 홍보 없이 공감 1~2문장만 쓴다.
 8. 직원 개인 경험은 지어내지 말고 [ ] 빈칸으로 남긴다. 그 외에는 빈칸을 남기지 않는다.
 9. 출력은 JSON 하나만: {"reply":"게시할 답글","ko":"reply와 같은 문장"}`;
@@ -793,6 +849,9 @@ function run(auto){
 $("goBtn").addEventListener("click",()=>run());
 let editT=null;
 $("outZh").addEventListener("input",()=>{if(!lastR)return;state.edited=true;$("koNote").hidden=false;$("copyMsg").textContent="";clearTimeout(editT);editT=setTimeout(()=>check($("outZh").value,{priceNote:lastR.priceNote,warnExp:lastR.warnExp}),300);});
+function lenUI(){document.querySelectorAll("#lenChips .chip").forEach(b=>{const on=(S.len==="long"?"long":"one")===b.dataset.len;b.classList.toggle("on",on);b.setAttribute("aria-pressed",on);});}
+lenUI();
+document.querySelectorAll("#lenChips .chip").forEach(b=>b.addEventListener("click",()=>{if(S.len===b.dataset.len)return;if(state.edited&&!confirmReroll())return;S.len=b.dataset.len;save();lenUI();if(state.a)generate();}));
 $("rerollBtn").addEventListener("click",()=>{if(state.edited&&!confirmReroll())return;seed=(seed+7919)%2147483646+1;if(lastR&&lastR.fromEx)exPos++;generate();});
 function confirmReroll(){const b=$("rerollBtn");if(b.dataset.armed){delete b.dataset.armed;b.textContent="문구 바꾸기";return true;}b.dataset.armed="1";b.textContent="수정한 내용이 사라져요. 한 번 더 누르기";setTimeout(()=>{delete b.dataset.armed;b.textContent="문구 바꾸기";},4000);return false;}
 $("clearBtn").addEventListener("click",()=>{$("post").value="";$("post").focus();});
